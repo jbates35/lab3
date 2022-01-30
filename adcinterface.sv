@@ -10,9 +10,13 @@ Date created: January 20,2022
 
 Implements the state of the ADC machine
 
+code for modelsim:
+vsim work.adcinterface_tb; add wave sim:*; run -all
+
 *********/
 
 `define SCK_COUNT_MAX 'd11
+`define N 12
 
 module adcinterface(
     input logic clk, reset_n, //Clock and reset
@@ -24,10 +28,10 @@ module adcinterface(
     input logic ADC_SDO
 );
 
-    logic [11:0] SPI_word_in, SPI_word_in_next; //If channel gets switched, need to make new word
-    logic [11:0] SPI_word_out; //This might be unnecessary - will store the result that gets stuffed into "result"
+    logic [`N:0] SPI_word_in, SPI_word_in_next; //If channel gets switched, need to make new word
+    logic [(`N-1):0] SPI_word_out; //This might be unnecessary - will store the result that gets stuffed into "result"
     logic [3:0] count, count_next; // Which bit in the result that is currently being updated
-    logic ADC_CONVST_next; // Take care of inversion
+    logic ADC_CONVST_next, ADC_SDI_next; // Take care of inversion and next config big
     logic word_finished; // Take rising edge and stuff word into result
     logic reset_count;  // Bit that resets count
 
@@ -52,7 +56,7 @@ module adcinterface(
         count_next = (count == 0) ? 0 : count-1;
 
         //Config word
-        SPI_word_in_next = (ADC_curr == s_adc_off) ? { 1'b1, chan[0], chan[2:1], 8'b1000_0000 } : SPI_word_in;
+        SPI_word_in_next = (ADC_curr == s_adc_off) ? { 1'b1, chan[0], chan[2:1], 9'b1_0000_0000 } : SPI_word_in;
 
         //Assign clock to SCK if correct state
         ADC_SCK = (ADC_curr == s_adc_active) ? clk : 1'b0;
@@ -62,6 +66,14 @@ module adcinterface(
 
         //SPI_word_in and count get set when this is high
         reset_count = (ADC_curr == s_adc_sampnhold) ? 'b1 : 'b0; 
+
+        //Config word bit
+        case(ADC_curr)
+            s_adc_sampnhold: ADC_SDI_next = SPI_word_in[`N];
+            s_adc_active: ADC_SDI_next = SPI_word_in[count];
+            default: ADC_SDI_next = 0;
+        endcase
+        
 
         //CONVST script
         if(ADC_curr == s_adc_off) ADC_CONVST_next = ~ADC_CONVST;
@@ -75,7 +87,6 @@ module adcinterface(
     end
     always_ff @(negedge ADC_SCK) begin
         count <= count_next;    
-        ADC_SDI <= SPI_word_in[count]; //Config message
     end
 
     //update result once ADC is finished
@@ -100,6 +111,7 @@ module adcinterface(
             ADC_CONVST <= ADC_CONVST_next;
             ADC_curr <= ADC_next;
             SPI_word_in <= SPI_word_in_next;
+            ADC_SDI <= ADC_SDI_next; //Config message
         end
     end
     
