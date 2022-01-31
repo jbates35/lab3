@@ -124,3 +124,5 @@ output_files/lab3.sld
 output_files/lab3.sof
 output_files/lab3.sta.rpt
 output_files/lab3.sta.summary
+*.rdb
+*.qws
