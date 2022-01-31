@@ -46,7 +46,7 @@ module lab3 (  output logic [3:0] kpc,  // column select, active-low
 		if (digit >= 2)
 			digit <= '0;
 		else
-			digit <= digit + 1'b1 ;
+			digit <= (digit + 1'b1) ;
 	end
 
     // enable the 7-segment module for the selected digit	
@@ -55,9 +55,9 @@ module lab3 (  output logic [3:0] kpc,  // column select, active-low
     // select the bits from the 12-bit ADC result for the selected digit	
 	always_comb
 	case( digit )
-        2 : displayNum = kphit ? adcValue[11:8] : 'hf ;
-        1 : displayNum = kphit ? adcValue[7:4] : 'hf  ;
-        0 : displayNum = kphit ? adcValue[3:0] : 'hf  ;
+        2 : displayNum = adcValue[11:8];
+        1 : displayNum = adcValue[7:4];
+        0 : displayNum = adcValue[3:0];
 		default: 
            displayNum = 'hf ; 
     endcase
