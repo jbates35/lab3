@@ -50,22 +50,20 @@ module lab3 (  output logic [3:0] kpc,  // column select, active-low
 	end
 
     // enable the 7-segment module for the selected digit	
-    assign ct =  1'b1 << digit;
+    assign ct =  kphit ? (1'b1 << digit) : 4'b0000;
 
     // select the bits from the 12-bit ADC result for the selected digit	
 	always_comb
 	case( digit )
-        2 : displayNum = adcValue[11:8];
-        1 : displayNum = adcValue[7:4];
-        0 : displayNum = adcValue[3:0];
+        2 : displayNum = adcValue[11:8] ;
+        1 : displayNum = adcValue[7:4] ;
+        0 : displayNum = adcValue[3:0] ;
 		default: 
            displayNum = 'hf ; 
     endcase
 	
 
 endmodule
-
-
 
 // megafunction wizard: %ALTPLL%
 // ...
