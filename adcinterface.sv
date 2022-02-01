@@ -35,83 +35,67 @@ module adcinterface(
     logic word_finished; // Take rising edge and stuff word into result
     logic reset_count;  // Bit that resets count
 
-    //State machine for the ADC
-    typedef enum logic[5:0] { s_adc_start, s_adc_off, s_adc_sampnhold, s_adc_active, s_adc_finished } state_t;
-        state_t ADC_curr = s_adc_start;
-        state_t ADC_next; //Change this later to be a bit shifter
+    //////////// STATE MACHINE  /////////////
+    typedef enum { S_START = 'h0, S_OFF = 'h1, S_HOLD = 'h2, S_ACTIVE = 'h4, S_FINISH = 'h8 } state_t;
+        state_t ADC_curr = S_START;
+        state_t ADC_next;
 
-    always_comb begin
+    always_comb begin : statemachines
         //Multiplex state machine
         ADC_next = ADC_curr;
 
         case(ADC_curr)
-            s_adc_start: ADC_next = s_adc_off;
-            s_adc_off: ADC_next = (ADC_CONVST=='b1) ? s_adc_sampnhold : s_adc_off; //Lets CONVST go high for one cycle
-            s_adc_sampnhold: ADC_next = s_adc_active; //Wait one cycle before taking ADC bits
-            s_adc_active: ADC_next = (count==0) ? s_adc_finished : s_adc_active; //Continue taking bits until count is 0
-            s_adc_finished: ADC_next = s_adc_off; //Wait one cycle before allowed to reset cycle
+            S_START: ADC_next = S_OFF;
+            S_OFF: ADC_next = (ADC_CONVST=='b1) ? S_HOLD : S_OFF; //Lets CONVST go high for one cycle
+            S_HOLD: ADC_next = S_ACTIVE; //Wait one cycle before taking ADC bits
+            S_ACTIVE: ADC_next = (count==0) ? S_FINISH : S_ACTIVE; //Continue taking bits until count is 0
+            S_FINISH: ADC_next = S_OFF; //Wait one cycle before allowed to reset cycle
         endcase
+    end : statemachines
 
-        //Assign next counts
-        count_next = (count == 0) ? 0 : count-1;
 
-        //Config word
-        SPI_word_in_next = (ADC_curr == s_adc_off) ? { 1'b1, chan[0], chan[2:1], 9'b1_0000_0000 } : SPI_word_in;
+    ///////////// ASSIGNMENTS ////////////////
+    always_comb begin : assignments
 
-        //Assign clock to SCK if correct state
-        ADC_SCK = (ADC_curr == s_adc_active) ? clk : 1'b0;
+        //Sets anytime
+        count_next = (count == 0) ? 0 : count-1; //Assign next counts
 
-        //Set to high when ADC is finished, else 0
-        word_finished = (ADC_curr == s_adc_finished) ? 'b1 : 'b0;
+        //Sets during ADC OFF
+        SPI_word_in_next = (ADC_curr == S_OFF) ? { 1'b1, chan[0], chan[2:1], 9'b1_0000_0000 } : SPI_word_in; //Config word gets set 
+        ADC_CONVST_next = (ADC_curr == S_OFF) ? ~ADC_CONVST : 'b0; //CONVST turns on to activate ADC
 
-        //SPI_word_in and count get set when this is high
-        reset_count = (ADC_curr == s_adc_sampnhold) ? 'b1 : 'b0; 
+        //Sets when ADC HOLD
+        reset_count = (ADC_curr == S_HOLD) ? 'b1 : 'b0; //SPI_word_in and count get set when this is high
 
-        //Config word bit
+        //Sets when ADC ACTIVE
+        ADC_SCK = (ADC_curr == S_ACTIVE) ? clk : 1'b0; //Assign clock to SCK if correct state
+        
+        //MSB of the Config word needs to get activated on the clock *before* SCK activates
         case(ADC_curr)
-            s_adc_sampnhold: ADC_SDI_next = SPI_word_in[`N];
-            s_adc_active: ADC_SDI_next = SPI_word_in[count];
+            S_HOLD: ADC_SDI_next = SPI_word_in[`N];
+            S_ACTIVE: ADC_SDI_next = SPI_word_in[count];
             default: ADC_SDI_next = 0;
         endcase
-        
-
-        //CONVST script
-        if(ADC_curr == s_adc_off) ADC_CONVST_next = ~ADC_CONVST;
-        else ADC_CONVST_next = 'b0;
-
     end
 
-    //Take care of sck clock counting down 
-    always_ff @(posedge ADC_SCK) begin  
-        SPI_word_out[count] <= ADC_SDO; //Capture word coming in from SDI Out of ADC
-    end
-    always_ff @(negedge ADC_SCK, posedge reset_count) begin
-			if(reset_count)        
-				//Reset count to max value (11)
-				count <= `SCK_COUNT_MAX;
-			else
-				//Else take next value of count which is either count-1 or 0
-				count <= count_next;    
-    end
-
-    //update result once ADC is finished
-    always_ff @(posedge word_finished) result <= SPI_word_out;
+    always_ff @(posedge ADC_SCK) SPI_word_out[count] <= ADC_SDO; //Capture word coming in from SDI Out of ADC
+    always_ff @(negedge ADC_SCK, posedge reset_count) count <= reset_count ? `SCK_COUNT_MAX : count_next; //Reset count to max value (11) or count-1 or 0
+    always_ff @(posedge ADC_curr[4]) result <= SPI_word_out; //update result once ADC is finished
 
     //State machine clock
-    always_ff @(negedge clk, negedge reset_n) begin   
+    always_ff @(negedge clk, negedge reset_n) begin: clock_ffs 
         //Reset ADC
         if(~reset_n) begin
-            ADC_curr <= s_adc_start;
-            ADC_SDI <= 'b0;
-            ADC_CONVST <= 'b0;
+            ADC_curr <= S_START; // Reset State machine
+            ADC_SDI <= 'b0; // Reset SDI bit
+            ADC_CONVST <= 'b0; // Rset CONVST in case
         end
         //Else, take next state of state machine
         else begin
-            ADC_CONVST <= ADC_CONVST_next;
-            ADC_curr <= ADC_next;
-            SPI_word_in <= SPI_word_in_next;
+            ADC_CONVST <= ADC_CONVST_next; // Activate ADC
+            ADC_curr <= ADC_next; // move state machine forward
+            SPI_word_in <= SPI_word_in_next; //Config message
             ADC_SDI <= ADC_SDI_next; //Config message
         end
-    end
-    
+    end : clock_ffs    
 endmodule
